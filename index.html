@@ -16,13 +16,17 @@ fbq('init', '4327697327497010');
 fbq('track', 'PageView');
 </script>        
 
-<script>      
+<script>
   window.pixelId = "6a0168664d26e330748d4bb8";
   var a = document.createElement("script");
   a.setAttribute("async", "");
   a.setAttribute("defer", "");
   a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel.js");
-  document.head.appendChild(a);  
+  document.head.appendChild(a);
+  // O pixel.js nao expoe window.utmify. A notificacao de venda e feita via servidor (check-payment.js).
+  window.utmify = function(action, event, data) {
+    console.log("[utmify stub] " + action + " " + event, data);
+  };
 </script>
         
 <script src="https://cdn.utmify.com.br/scripts/utms/latest.js" data-utmify-prevent-xcod-sck data-utmify-prevent-subids async defer></script>

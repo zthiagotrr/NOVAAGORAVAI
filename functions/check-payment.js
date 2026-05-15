@@ -1,4 +1,10 @@
 const { getSupabase } = require("./lib/supabase");
+const crypto = require("crypto");
+
+function sha256(value) {
+  if (!value) return null;
+  return crypto.createHash("sha256").update(String(value).toLowerCase().trim()).digest("hex");
+}
 
 const GOTHAM_BASE = "https://api.gothampaybr.com";
 
@@ -90,10 +96,138 @@ exports.handler = async (event) => {
 
   try {
     const supabase = getSupabase();
-    await supabase
-      .from("transactions")
-      .update({ status, paid_at: paid ? (paidAt || new Date().toISOString()) : null })
-      .eq("transaction_id", transactionId);
+
+    if (paid) {
+      const { data: txData } = await supabase
+        .from("transactions")
+        .select("status, customer_name, customer_email, customer_phone, customer_cpf, amount")
+        .eq("transaction_id", transactionId)
+        .single();
+
+      const alreadyPaid = txData?.status === "paid";
+
+      await supabase
+        .from("transactions")
+        .update({ status, paid_at: paidAt || new Date().toISOString() })
+        .eq("transaction_id", transactionId);
+
+      if (!alreadyPaid && txData) {
+        const utmifyToken = process.env.UTMIFY_API_TOKEN || process.env.UTMIFY_PIXEL_ID;
+        if (utmifyToken) {
+          const nowTs = new Date().toISOString().replace("T", " ").split(".")[0];
+          const amountCents = Math.round((txData.amount || 49.90) * 100);
+
+          // ── Facebook Conversions API ──────────────────────────────────
+          const fbToken = process.env.FACEBOOK_ACCESS_TOKEN;
+          const fbPixelId = process.env.FACEBOOK_PIXEL_ID || "4327697327497010";
+          if (fbToken && !fbToken.startsWith("COLE_")) {
+            const nameParts = (txData.customer_name || "").trim().split(/\s+/);
+            const fbPayload = {
+              data: [
+                {
+                  event_name: "Purchase",
+                  event_time: Math.floor(Date.now() / 1000),
+                  action_source: "website",
+                  event_id: transactionId,
+                  user_data: {
+                    em: sha256(txData.customer_email),
+                    ph: sha256("55" + (txData.customer_phone || "").replace(/\D/g, "")),
+                    fn: sha256(nameParts[0]),
+                    ln: sha256(nameParts.slice(1).join(" ") || nameParts[0]),
+                    ge: null,
+                    db: null,
+                  },
+                  custom_data: {
+                    currency: "BRL",
+                    value: txData.amount || 49.90,
+                    content_ids: [transactionId],
+                    content_type: "product",
+                    content_name: "Livro Falante",
+                  },
+                },
+              ],
+            };
+
+            fetch(
+              `https://graph.facebook.com/v20.0/${fbPixelId}/events?access_token=${fbToken}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(fbPayload),
+              }
+            )
+              .then(async (r) => {
+                const body = await r.text();
+                if (!r.ok) console.error("[Facebook CAPI] Erro:", r.status, body);
+                else console.log("[Facebook CAPI] Conversão enviada:", transactionId);
+              })
+              .catch((e) => console.error("[Facebook CAPI] Falha:", e));
+          }
+
+          // ── Utmify Orders API ─────────────────────────────────────────
+          fetch("https://api.utmify.com.br/api-credentials/orders", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-token": utmifyToken,
+            },
+            body: JSON.stringify({
+              orderId: transactionId,
+              platform: "GothamPay",
+              paymentMethod: "pix",
+              status: "paid",
+              createdAt: nowTs,
+              approvedDate: nowTs,
+              refundedAt: null,
+              customer: {
+                name: txData.customer_name || "",
+                email: txData.customer_email || "",
+                phone: (txData.customer_phone || "").replace(/\D/g, "") || null,
+                document: (txData.customer_cpf || "").replace(/\D/g, "") || null,
+                country: "BR",
+                ip: null,
+              },
+              products: [
+                {
+                  id: "livro-falante",
+                  name: "Livro Falante",
+                  planId: null,
+                  planName: null,
+                  quantity: 1,
+                  priceInCents: amountCents,
+                },
+              ],
+              trackingParameters: {
+                src: null,
+                sck: null,
+                utm_source: null,
+                utm_campaign: null,
+                utm_medium: null,
+                utm_content: null,
+                utm_term: null,
+              },
+              commission: {
+                totalPriceInCents: amountCents,
+                gatewayFeeInCents: 0,
+                userCommissionInCents: amountCents,
+              },
+              isTest: false,
+            }),
+          })
+            .then(async (r) => {
+              const body = await r.text();
+              if (!r.ok) console.error("[Utmify] Resposta de erro:", r.status, body);
+              else console.log("[Utmify] Venda notificada com sucesso:", transactionId);
+            })
+            .catch((e) => console.error("[Utmify] Falha ao notificar venda:", e));
+        }
+      }
+    } else {
+      await supabase
+        .from("transactions")
+        .update({ status, paid_at: null })
+        .eq("transaction_id", transactionId);
+    }
   } catch (_) {}
 
   return jsonResponse(200, {
