@@ -112,114 +112,149 @@ exports.handler = async (event) => {
         .eq("transaction_id", transactionId);
 
       if (!alreadyPaid && txData) {
-        const utmifyToken = process.env.UTMIFY_API_TOKEN || process.env.UTMIFY_PIXEL_ID;
-        if (utmifyToken) {
-          const nowTs = new Date().toISOString().replace("T", " ").split(".")[0];
-          const amountCents = Math.round((txData.amount || 49.90) * 100);
+        const nowTs = new Date().toISOString().replace("T", " ").split(".")[0];
+        const amountValue = Number(txData.amount) || 49.90;
+        const amountCents = Math.round(amountValue * 100);
 
-          // ── Facebook Conversions API ──────────────────────────────────
-          const fbToken = process.env.FACEBOOK_ACCESS_TOKEN;
-          const fbPixelId = process.env.FACEBOOK_PIXEL_ID || "4327697327497010";
-          if (fbToken && !fbToken.startsWith("COLE_")) {
-            const nameParts = (txData.customer_name || "").trim().split(/\s+/);
-            const fbPayload = {
-              data: [
-                {
-                  event_name: "Purchase",
-                  event_time: Math.floor(Date.now() / 1000),
-                  action_source: "website",
-                  event_id: transactionId,
-                  user_data: {
-                    em: sha256(txData.customer_email),
-                    ph: sha256("55" + (txData.customer_phone || "").replace(/\D/g, "")),
-                    fn: sha256(nameParts[0]),
-                    ln: sha256(nameParts.slice(1).join(" ") || nameParts[0]),
-                    ge: null,
-                    db: null,
-                  },
-                  custom_data: {
-                    currency: "BRL",
-                    value: txData.amount || 49.90,
-                    content_ids: [transactionId],
-                    content_type: "product",
-                    content_name: "Livro Falante",
-                  },
-                },
-              ],
-            };
+        // Headers do cliente (vindos do polling do frontend)
+        const headers = event.headers || {};
+        const clientIp =
+          headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+          headers["x-real-ip"] ||
+          headers["client-ip"] ||
+          null;
+        const clientUserAgent = headers["user-agent"] || null;
+        const cookieHeader = headers["cookie"] || "";
+        const fbpMatch = cookieHeader.match(/_fbp=([^;]+)/);
+        const fbcMatch = cookieHeader.match(/_fbc=([^;]+)/);
+        const fbp = fbpMatch ? fbpMatch[1] : null;
+        const fbc = fbcMatch ? fbcMatch[1] : null;
+        const referer = headers["referer"] || headers["origin"] || null;
 
-            fetch(
-              `https://graph.facebook.com/v20.0/${fbPixelId}/events?access_token=${fbToken}`,
+        // ── Facebook Conversions API ──────────────────────────────────
+        const fbToken = process.env.FACEBOOK_ACCESS_TOKEN;
+        const fbPixelId = process.env.FACEBOOK_PIXEL_ID || "4327697327497010";
+        if (fbToken && !fbToken.startsWith("COLE_")) {
+          const nameParts = (txData.customer_name || "").trim().split(/\s+/);
+          const emHash = sha256(txData.customer_email);
+          const phHash = sha256("55" + (txData.customer_phone || "").replace(/\D/g, ""));
+          const fnHash = sha256(nameParts[0]);
+          const lnHash = sha256(nameParts.slice(1).join(" ") || nameParts[0]);
+          const cpfHash = sha256((txData.customer_cpf || "").replace(/\D/g, ""));
+          const countryHash = sha256("br");
+
+          const userData = {};
+          if (emHash) userData.em = [emHash];
+          if (phHash) userData.ph = [phHash];
+          if (fnHash) userData.fn = [fnHash];
+          if (lnHash) userData.ln = [lnHash];
+          if (cpfHash) userData.external_id = [cpfHash];
+          if (countryHash) userData.country = [countryHash];
+          if (clientIp) userData.client_ip_address = clientIp;
+          if (clientUserAgent) userData.client_user_agent = clientUserAgent;
+          if (fbp) userData.fbp = fbp;
+          if (fbc) userData.fbc = fbc;
+
+          const fbEvent = {
+            event_name: "Purchase",
+            event_time: Math.floor(Date.now() / 1000),
+            action_source: "website",
+            event_id: transactionId,
+            user_data: userData,
+            custom_data: {
+              currency: "BRL",
+              value: amountValue,
+              content_ids: ["livro-falante"],
+              content_type: "product",
+              content_name: "Livro Falante",
+              num_items: 1,
+            },
+          };
+          if (referer) fbEvent.event_source_url = referer;
+
+          const fbPayload = { data: [fbEvent] };
+
+          try {
+            const fbResp = await fetch(
+              `https://graph.facebook.com/v20.0/${fbPixelId}/events?access_token=${encodeURIComponent(fbToken)}`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(fbPayload),
               }
-            )
-              .then(async (r) => {
-                const body = await r.text();
-                if (!r.ok) console.error("[Facebook CAPI] Erro:", r.status, body);
-                else console.log("[Facebook CAPI] Conversão enviada:", transactionId);
-              })
-              .catch((e) => console.error("[Facebook CAPI] Falha:", e));
+            );
+            const fbBody = await fbResp.text();
+            if (!fbResp.ok) {
+              console.error("[Facebook CAPI] Erro:", fbResp.status, fbBody);
+            } else {
+              console.log("[Facebook CAPI] Conversão enviada:", transactionId, fbBody);
+            }
+          } catch (e) {
+            console.error("[Facebook CAPI] Falha:", e);
           }
+        } else {
+          console.warn("[Facebook CAPI] FACEBOOK_ACCESS_TOKEN não configurado");
+        }
 
-          // ── Utmify Orders API ─────────────────────────────────────────
-          fetch("https://api.utmify.com.br/api-credentials/orders", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-api-token": utmifyToken,
-            },
-            body: JSON.stringify({
-              orderId: transactionId,
-              platform: "GothamPay",
-              paymentMethod: "pix",
-              status: "paid",
-              createdAt: nowTs,
-              approvedDate: nowTs,
-              refundedAt: null,
-              customer: {
-                name: txData.customer_name || "",
-                email: txData.customer_email || "",
-                phone: (txData.customer_phone || "").replace(/\D/g, "") || null,
-                document: (txData.customer_cpf || "").replace(/\D/g, "") || null,
-                country: "BR",
-                ip: null,
+        // ── Utmify Orders API ─────────────────────────────────────────
+        const utmifyToken = process.env.UTMIFY_API_TOKEN || process.env.UTMIFY_PIXEL_ID;
+        if (utmifyToken) {
+          try {
+            const utmResp = await fetch("https://api.utmify.com.br/api-credentials/orders", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-token": utmifyToken,
               },
-              products: [
-                {
-                  id: "livro-falante",
-                  name: "Livro Falante",
-                  planId: null,
-                  planName: null,
-                  quantity: 1,
-                  priceInCents: amountCents,
+              body: JSON.stringify({
+                orderId: transactionId,
+                platform: "GothamPay",
+                paymentMethod: "pix",
+                status: "paid",
+                createdAt: nowTs,
+                approvedDate: nowTs,
+                refundedAt: null,
+                customer: {
+                  name: txData.customer_name || "",
+                  email: txData.customer_email || "",
+                  phone: (txData.customer_phone || "").replace(/\D/g, "") || null,
+                  document: (txData.customer_cpf || "").replace(/\D/g, "") || null,
+                  country: "BR",
+                  ip: clientIp,
                 },
-              ],
-              trackingParameters: {
-                src: null,
-                sck: null,
-                utm_source: null,
-                utm_campaign: null,
-                utm_medium: null,
-                utm_content: null,
-                utm_term: null,
-              },
-              commission: {
-                totalPriceInCents: amountCents,
-                gatewayFeeInCents: 0,
-                userCommissionInCents: amountCents,
-              },
-              isTest: false,
-            }),
-          })
-            .then(async (r) => {
-              const body = await r.text();
-              if (!r.ok) console.error("[Utmify] Resposta de erro:", r.status, body);
-              else console.log("[Utmify] Venda notificada com sucesso:", transactionId);
-            })
-            .catch((e) => console.error("[Utmify] Falha ao notificar venda:", e));
+                products: [
+                  {
+                    id: "livro-falante",
+                    name: "Livro Falante",
+                    planId: null,
+                    planName: null,
+                    quantity: 1,
+                    priceInCents: amountCents,
+                  },
+                ],
+                trackingParameters: {
+                  src: null,
+                  sck: null,
+                  utm_source: null,
+                  utm_campaign: null,
+                  utm_medium: null,
+                  utm_content: null,
+                  utm_term: null,
+                },
+                commission: {
+                  totalPriceInCents: amountCents,
+                  gatewayFeeInCents: 0,
+                  userCommissionInCents: amountCents,
+                },
+                isTest: false,
+              }),
+            });
+            const utmBody = await utmResp.text();
+            if (!utmResp.ok) console.error("[Utmify] Resposta de erro:", utmResp.status, utmBody);
+            else console.log("[Utmify] Venda notificada com sucesso:", transactionId);
+          } catch (e) {
+            console.error("[Utmify] Falha ao notificar venda:", e);
+          }
         }
       }
     } else {

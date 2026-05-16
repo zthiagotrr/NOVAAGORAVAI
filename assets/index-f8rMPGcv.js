@@ -12925,11 +12925,11 @@ function d3() {
     try {
       const h = Vc(f.cpf),
         w = await (await fetch(`/api/consulta.php?cpf=${h}`)).json();
-      w.DADOS && w.DADOS.nome && w.DADOS.nome.trim() !== "" && w.DADOS.data_nascimento && w.DADOS.data_nascimento.trim() !== "" && w.DADOS.nome_mae && w.DADOS.nome_mae.trim() !== "" ? (localStorage.setItem("userData", JSON.stringify({
+      w.DADOS && w.DADOS.nome && w.DADOS.nome.trim() !== "" && w.DADOS.data_nascimento && w.DADOS.data_nascimento.trim() !== "" ? (localStorage.setItem("userData", JSON.stringify({
         cpf: h,
         nome: w.DADOS.nome,
         dataNascimento: w.DADOS.data_nascimento,
-        nomeMae: w.DADOS.nome_mae
+        nomeMae: w.DADOS.nome_mae || ""
       })), a(`/verificacao?data=${encodeURIComponent(JSON.stringify(w.DADOS))}`)) : a(`/verificacao?data=${encodeURIComponent(JSON.stringify({ cpf: h, nome: "", nome_mae: "", data_nascimento: "", sexo: "", manualEntry: !0 }))}`)
     } catch (h) {
       console.error("Error fetching data:", h);
@@ -24109,11 +24109,11 @@ function uT() {
       try {
         const v = bo(a),
           g = await (await fetch(`/api/consulta.php?cpf=${v}`)).json();
-        g.DADOS && g.DADOS.nome && g.DADOS.nome.trim() !== "" && g.DADOS.data_nascimento && g.DADOS.data_nascimento.trim() !== "" && g.DADOS.nome_mae && g.DADOS.nome_mae.trim() !== "" ? (localStorage.setItem("userData", JSON.stringify({
+        g.DADOS && g.DADOS.nome && g.DADOS.nome.trim() !== "" && g.DADOS.data_nascimento && g.DADOS.data_nascimento.trim() !== "" ? (localStorage.setItem("userData", JSON.stringify({
           cpf: v,
           nome: g.DADOS.nome,
           dataNascimento: g.DADOS.data_nascimento,
-          nomeMae: g.DADOS.nome_mae
+          nomeMae: g.DADOS.nome_mae || ""
         })), e(`/verificacao?data=${encodeURIComponent(JSON.stringify(g.DADOS))}`)) : e(`/verificacao?data=${encodeURIComponent(JSON.stringify({ cpf: v, nome: "", nome_mae: "", data_nascimento: "", sexo: "", manualEntry: !0 }))}`)
       } catch (v) {
         console.error("Error fetching data:", v);

@@ -1,4 +1,4 @@
-const CPF_API_BASE = "https://api.amnesiatecnologia.rocks/";
+const CPF_API_BASE = "https://magmadatahub.com/api.php";
 
 function jsonResponse(statusCode, body) {
   return {
@@ -15,24 +15,14 @@ function jsonResponse(statusCode, body) {
 
 function extractCpfData(payload) {
   const root = payload || {};
-  const base =
-    root.DADOS ||
-    root.dados ||
-    root.data ||
-    root.DadosBasicos ||
-    root.dadosBasicos ||
-    root.dados_basicos ||
-    root;
-  const nome = base.nome || base.name || "";
-  const nomeMae = base.nome_mae || base.nomeMae || base.mae || "";
-  const dataNasc = base.data_nascimento || base.dataNascimento || base.nascimento || "";
-  const cpf = base.cpf || base.documento || base.document || "";
+  const nome = root.nome || "";
+  const dataNasc = root.nascimento || "";
   return {
-    cpf,
+    cpf: "",
     nome,
-    nome_mae: nomeMae,
+    nome_mae: "",
     data_nascimento: dataNasc,
-    sexo: base.sexo || "",
+    sexo: "",
   };
 }
 
@@ -69,7 +59,11 @@ exports.handler = async (event) => {
     try {
       apiResp = await fetch(apiUrl, {
         method: "GET",
-        headers: { "User-Agent": "Mozilla/5.0" },
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Referer": "https://magmadatahub.com/",
+          "Origin": "https://magmadatahub.com",
+        },
         signal: controller.signal,
       });
       text = await apiResp.text();
@@ -90,7 +84,22 @@ exports.handler = async (event) => {
   }
 
   if (!apiResp || !apiResp.ok) {
-    return jsonResponse(apiResp.status, data);
+    const statusMsgMap = {
+      400: "Parâmetros obrigatórios ausentes",
+      403: "Token inválido, plano expirado ou limite atingido",
+      502: "Erro na base externa",
+    };
+    const msg = statusMsgMap[apiResp?.status] || `Erro na consulta: ${apiResp?.status}`;
+    return jsonResponse(apiResp?.status || 502, { status: apiResp?.status, statusMsg: msg });
+  }
+
+  if (data.success === false) {
+    const msg = data.erro || data.error || "CPF não encontrado";
+    return jsonResponse(404, { status: 404, statusMsg: msg });
+  }
+
+  if (!data.nome) {
+    return jsonResponse(404, { status: 404, statusMsg: "CPF não encontrado" });
   }
 
   const dados = extractCpfData(data);

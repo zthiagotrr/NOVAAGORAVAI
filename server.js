@@ -1,4 +1,5 @@
 require("dotenv").config({ path: ".env.local" });
+require("dotenv").config({ path: ".env", override: false });
 const express = require("express");
 const path = require("path");
 
