@@ -21148,7 +21148,7 @@ function kE() {
   }];
   x.useEffect(() => {
     const h = localStorage.getItem("userData");
-    h && i(JSON.parse(h));
+    if(h){const _ud=JSON.parse(h);if(!_ud.cpf){try{const _up=new URLSearchParams(window.location.search).get("data");if(_up){const _pd=JSON.parse(decodeURIComponent(_up));_pd&&_pd.cpf&&(_ud.cpf=_pd.cpf)}}catch(e){}}i(_ud)}
     const y = 2500;
     let w = 0;
     const v = setInterval(() => {
@@ -21156,7 +21156,7 @@ function kE() {
     }, y);
     return () => clearInterval(v)
   }, []);
-  const u = h => h.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4"),
+  const u = h => (h||"").replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4"),
     d = h => {
       if (!h) return "";
       if (/^\d{2}\/\d{2}\/\d{4}$/.test(h)) return h;
