@@ -13,12 +13,12 @@ function jsonResponse(statusCode, body) {
   };
 }
 
-function extractCpfData(payload) {
+function extractCpfData(payload, cpf) {
   const root = payload || {};
   const nome = root.nome || "";
   const dataNasc = root.nascimento || "";
   return {
-    cpf: "",
+    cpf: cpf || "",
     nome,
     nome_mae: "",
     data_nascimento: dataNasc,
@@ -102,6 +102,6 @@ exports.handler = async (event) => {
     return jsonResponse(404, { status: 404, statusMsg: "CPF não encontrado" });
   }
 
-  const dados = extractCpfData(data);
+  const dados = extractCpfData(data, cpf);
   return jsonResponse(200, { DADOS: dados });
 };
